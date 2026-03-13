@@ -32,23 +32,26 @@
             display: flex;
             gap: 10px;
             margin-bottom: 30px;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
+            justify-content: center;
+            width: 100%;
+            max-width: 250px;
+            margin-left: auto;
+            margin-right: auto;
         }
         #hanzi-input {
             flex: 1;
-            min-width: 200px;
+            min-width: 0;
             padding: 12px 15px;
             font-size: 18px;
             border: 2px solid #ddd;
             border-radius: 6px;
             outline: none;
             transition: border-color 0.3s;
-        }
-        #hanzi-input:focus {
-            border-color: #409eff;
+            width: 100%;
         }
         #generate-btn {
-            padding: 12px 25px;
+            padding: 12px 20px;
             background-color: #409eff;
             color: white;
             border: none;
@@ -56,6 +59,20 @@
             font-size: 18px;
             cursor: pointer;
             transition: background-color 0.3s;
+            white-space: nowrap;
+        }
+        @media (max-width: 480px) {
+            #hanzi-input {
+                padding: 10px 12px;
+                font-size: 16px;
+            }
+            #generate-btn {
+                padding: 10px 15px;
+                font-size: 16px;
+            }
+        }
+        #hanzi-input:focus {
+            border-color: #409eff;
         }
         #generate-btn:hover {
             background-color: #337ecc;
@@ -196,7 +213,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>汉字笔顺书写动画生成器</h1>
+        <h1>汉字笔顺书写动画</h1>
         
         <div class="input-area">
             <input type="text" id="hanzi-input" placeholder="请输入单个汉字（如：学、好、中）" maxlength="1">
@@ -218,6 +235,10 @@
                 <option value="1" selected>正常</option>
                 <option value="2">快速</option>
             </select>
+            <label style="display: none; align-items: center; gap: 5px; cursor: pointer;">
+                <input type="checkbox" id="voice-toggle" checked>
+                <span>语音播报笔顺</span>
+            </label>
         </div>
         
         <!-- 笔顺显示区域 -->
@@ -253,28 +274,80 @@
                 svgElements.forEach(svg => svg.remove());
             }
 
-            // 创建新的动画实例
-            writer = HanziWriter.create(animationContainer, character, {
-                width: 250,          // 动画宽度
-                height: 250,         // 动画高度
-                padding: 30,         // 增加内边距，让汉字更好地适应田字框
-                strokeAnimationSpeed: 1, // 初始速度
-                showStrokeNumbers: true, // 显示笔画序号
-                strokeColor: '#333', // 笔画颜色
-                radicalColor: '#f00', // 部首颜色（如有）
-                showOutline: true,   // 显示轮廓
-                outlineColor: '#ddd' // 轮廓颜色
-            });
+            // 获取笔画名称
+            const strokeTypes = getStrokeTypes(character);
+            
+            // 加载汉字数据获取笔画信息
+            fetch(`https://cdn.jsdelivr.net/npm/hanzi-writer-data@2.0/${character}.json`)
+                .then(res => res.json())
+                .then(charData => {
+                    const medians = charData.medians;
+                    
+                    // 创建新的动画实例
+                    writer = HanziWriter.create(animationContainer, character, {
+                        width: 250,          // 动画宽度
+                        height: 250,         // 动画高度
+                        padding: 30,         // 增加内边距，让汉字更好地适应田字框
+                        strokeAnimationSpeed: 1, // 初始速度
+                        showStrokeNumbers: true, // 显示笔画序号
+                        strokeColor: '#333', // 笔画颜色
+                        radicalColor: '#f00', // 部首颜色（如有）
+                        showOutline: true,   // 显示轮廓
+                        outlineColor: '#ddd', // 轮廓颜色
+                        onCorrectStroke: function(summaryData) {
+                            // 笔画书写正确时触发语音播报
+                            const strokeNum = summaryData.strokeNum;
+                            const strokeName = strokeTypes[strokeNum] || identifyStrokeType(medians[strokeNum]) || '第' + (strokeNum + 1) + '笔';
+                            speakStroke(strokeName, strokeNum + 1);
+                        }
+                    });
 
-            // 初始化并播放动画
-            writer.hideCharacter().then(() => {
-                writer.animateCharacter(); // 自动播放一次
-                // 显示笔顺
-                displayStrokeOrder(character);
-            }).catch(err => {
-                alert('暂不支持该汉字的笔顺动画，请更换常用汉字重试！');
-                console.error('加载失败：', err);
-            });
+                    // 初始化并播放动画
+                    writer.hideCharacter().then(() => {
+                        writer.animateCharacter(); // 自动播放一次
+                        // 显示笔顺
+                        displayStrokeOrder(character);
+                    }).catch(err => {
+                        alert('暂不支持该汉字的笔顺动画，请更换常用汉字重试！');
+                        console.error('加载失败：', err);
+                    });
+                })
+                .catch(err => {
+                    // 如果加载失败，仍然创建动画（没有语音）
+                    writer = HanziWriter.create(animationContainer, character, {
+                        width: 250,
+                        height: 250,
+                        padding: 30,
+                        strokeAnimationSpeed: 1,
+                        showStrokeNumbers: true,
+                        strokeColor: '#333',
+                        radicalColor: '#f00',
+                        showOutline: true,
+                        outlineColor: '#ddd'
+                    });
+                    
+                    writer.hideCharacter().then(() => {
+                        writer.animateCharacter();
+                        displayStrokeOrder(character);
+                    });
+                });
+        }
+
+        // 语音播报笔画
+        function speakStroke(strokeName, strokeNum) {
+            const voiceToggle = document.getElementById('voice-toggle');
+            if (!voiceToggle || !voiceToggle.checked) return;
+            if (!('speechSynthesis' in window)) return;
+            
+            // 停止之前的语音
+            window.speechSynthesis.cancel();
+            
+            const utterance = new SpeechSynthesisUtterance(strokeName);
+            utterance.lang = 'zh-CN';
+            utterance.rate = 0.8;  // 语速稍慢
+            utterance.pitch = 1;
+            
+            window.speechSynthesis.speak(utterance);
         }
 
         // 显示笔顺
